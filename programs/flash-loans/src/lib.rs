@@ -81,6 +81,18 @@ pub mod flash_loans {
     }
 
     pub fn Repay(ctx: Context<Loan>) -> Result<()> {
+        let ixs = ctx.accounts.instructions.to_account_info();
+        let mut amount_borrowed: u64;
+
+        if let Ok(borrow_ix) = load_instruction_at_checked(0, &ixs) {
+            /// check borrowd amount
+                let mut borrowed_data: [u8;8] = [0u8;8];
+                borrowed_data.copy_from_slice(&borrow_ix.data[8..16]);
+                amount_borrowed = u64::from_le_bytes(borrowed_data);
+
+        } else {
+            return Err(ProtocolError::MissingBorrowIx.into());
+        }
         msg!("Greetings from: {:?}", ctx.program_id);
         Ok(())
     }
