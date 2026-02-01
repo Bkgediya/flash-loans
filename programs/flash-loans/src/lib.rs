@@ -14,7 +14,8 @@ declare_id!("22222222222222222222222222222222222222222222");
 
 #[program]
 pub mod flash_loans {
-    use core::borrow;
+
+    use anchor_lang::prelude::sysvar::instructions::load_current_index_checked;
 
     use super::*;
 
@@ -47,6 +48,8 @@ pub mod flash_loans {
 
         // Check how many instruction we have in this transaction
         let instruction_sysvar = ixs.try_borrow_data()?;
+        let len = u16::from_le_bytes(instruction_sysvar[0..2].try_into().unwrap());
+
         if let Ok(repay_ix) = load_instruction_at_checked(len as usize - 1, &ixs) {
             // Instruction checks
             require_keys_eq!(repay_ix.program_id, ID, ProtocolError::InvalidProgram);
@@ -86,13 +89,35 @@ pub mod flash_loans {
 
         if let Ok(borrow_ix) = load_instruction_at_checked(0, &ixs) {
             /// check borrowd amount
-                let mut borrowed_data: [u8;8] = [0u8;8];
-                borrowed_data.copy_from_slice(&borrow_ix.data[8..16]);
-                amount_borrowed = u64::from_le_bytes(borrowed_data);
-
+            let mut borrowed_data: [u8; 8] = [0u8; 8];
+            borrowed_data.copy_from_slice(&borrow_ix.data[8..16]);
+            amount_borrowed = u64::from_le_bytes(borrowed_data);
         } else {
             return Err(ProtocolError::MissingBorrowIx.into());
         }
+
+        // Add the fee to the amount borrowed (In our case we hardcoded it to 500 basis point)
+        let fee = (amount_borrowed as u128)
+            .checked_mul(500)
+            .unwrap()
+            .checked_div(10_000)
+            .ok_or(ProtocolError::Overflow)? as u64;
+        amount_borrowed = amount_borrowed
+            .checked_add(fee)
+            .ok_or(ProtocolError::Overflow)?;
+
+        transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.borrower_ata.to_account_info(),
+                    to: ctx.accounts.protocol_ata.to_account_info(),
+                    authority: ctx.accounts.borrower.to_account_info(),
+                },
+            ),
+            amount_borrowed,
+        )?;
+
         msg!("Greetings from: {:?}", ctx.program_id);
         Ok(())
     }
